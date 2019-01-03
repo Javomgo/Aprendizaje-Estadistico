@@ -13,9 +13,47 @@ apps.df$Size[apps.df$Size == "Varies with device"] = NA
 apps.df = mutate(apps.df[,-c(10:13)]) %>% na.omit %>% droplevels()
 apps.df = apps.df[!duplicated(apps.df),]
 apps.df$Reviews = as.numeric(as.character(apps.df$Reviews))
+
+#Tratamiento del tamaño
 apps.df$Size = as.character(apps.df$Size)
+size_express_mb <- "[0-9]+[[:punct:]]?[0-9]*M"
+size_express_kb <- "[0-9]+[[:punct:]]?[0-9]*k"
+
+index_mb <- grep(apps.df$Size,pattern = size_express_mb)
+mb.match = regexpr(apps.df$Size, pattern = size_express_mb)
+mb = regmatches(apps.df$Size,mb.match)
+
+mb1 <- substr(mb, 1,nchar(mb) - 1)
+mb1 <- as.numeric(mb1)*1000
+apps.df$Size[index_mb] <- mb1
+
+index_kb <- grep(apps.df$Size,pattern = size_express_kb)
+kb.match = regexpr(apps.df$Size, pattern = size_express_kb)
+kb = regmatches(apps.df$Size,kb.match)
+
+kb1 <- substr(kb, 1,nchar(kb) - 1)
+kb1 <- as.numeric(kb1)
+apps.df$Size[index_kb] <- kb1
+apps.df$Size = as.numeric(apps.df$Size)
+
+# Tratamiento de la variable Install
+
+apps.df$Installs = as.character(apps.df$Installs)
+apps.df$Installs = substr(apps.df$Installs, 1, nchar(apps.df$Installs)-1)
+apps.df$Installs = gsub(",", "", c(apps.df$Installs))
+apps.df$Installs = as.numeric(apps.df$Installs)
+
+#Tratamiento de la variable Price
+
+apps.df$Price = as.character(apps.df$Price)
+apps.df$Price = substr(apps.df$Price, 2, nchar(apps.df$Price))
+apps.df$Price[apps.df$Price == ""] = 0
+
 
 set.seed(11)
+
+
+
 
 # Make 60% to train, 20% to validate, and 20% to test (your prefered model)
 inTraining <- createDataPartition(apps.df$Installs, p=0.6, list=FALSE)
