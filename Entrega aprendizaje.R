@@ -2,10 +2,14 @@ library(dplyr)
 require("caret")
 require("randomForest")
 require("gbm")
+
 video.df = read.csv("Video_Games_Sales_as_at_22_Dec_2016.csv")
-video.df = mutate(video.df[,-c(11:16)]) %>% na.omit
+video.df$Genre[video.df$Genre == ""] = NA
+video.df = mutate(video.df[,-c(11:16)]) %>% na.omit %>% droplevels()
+
+
 str(video.df)
-set.seed(111)
+set.seed(11)
 
 # Make 60% to train, 20% to validate, and 20% to test (your prefered model)
 inTraining <- createDataPartition(video.df$Genre, p=0.6, list=FALSE)
@@ -41,8 +45,9 @@ ncol(video.df)-1
 rfGrid <-  expand.grid(mtry = c(1,2,3,4,6,9,12))
 rfGrid
 
+
 ### Gradient boosting machine algorithm. ###
-fit.gbm <- train(Genre~., data=dataset, method = 'gbm', trControl=fitControl, tuneGrid=gbmGrid, metric='Accuracy', distribution='multinomial')
+fit.gbm <- train(Genre~ Platform + Year_of_Release + NA_Sales+ EU_Sales+ JP_Sales + Other_Sales , data=dataset, method = 'gbm', trControl=fitControl, tuneGrid=gbmGrid, metric='Accuracy', distribution='multinomial')
 fit.gbm
 plot(fit.gbm)
 fit.gbm$bestTune
