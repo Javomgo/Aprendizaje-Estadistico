@@ -1,0 +1,246 @@
+---
+title: "Ortiz_Javier_GoogleApps"
+author: "Javier Ortiz Montenegro"
+date: "4 de enero de 2019"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Parte del código está extraida de: "https://www.kaggle.com/q2000qfq/rate-predictor", ejemplo drug001 y ejemplo XGBoost.
+
+Los datos son distintas caracteristicas de un conjunto de apps de Google Play Store entre las que podemos encontrar la cantidad de descargas, el rating, la cantidad de reviews, a que categoría pertenecen, precio, edad objetivo etc.
+He considerado que era una base de datos interesante ya que la cantidad de apps que se lanzan al año es enorme y creo que podría ser interesante realizar una predicción de las descargas que va a tener una app antes de ser lanzada en funcion de a que categoría pertenece, la edad del publico objetivo, su precio, etc.
+Esto ayudaría a las empresas desarrolladoras de apps a una asignación eficiente de sus activos a los proyectos con mayor previsión.
+
+Una vez realizada la introducción del dataset se procederá al tratamiento.
+
+Se empieza cargando las librerías necesarias.
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(xgboost)
+require("caret")
+require("randomForest")
+require("gbm")
+```
+
+Posteriormente se realiza la carga y tratamiento de los datos. Al realizar un "summary" de los datos cargados nos encontramos frente a varios problemas, algunos errores en valores imposibles (Rating de 19 cuando unicamente es de 1 a 5), una observación se ha introducido incorrectamente, NAs, practicamente todas las variables como factor, etc...
+
+```{r}
+#Carga de datos y revisión de los mismos.
+apps.df = read.csv("googleplaystore.csv")
+summary(apps.df)
+str(apps.df)
+
+#Tratamiento de valores atipicos, NA y duplicados.
+apps.df$Installs[apps.df$Installs == "Free" ] = NA
+apps.df$Rating[apps.df$Rating == 19] = NA
+apps.df$Size[apps.df$Size == "Varies with device"] = NA
+apps.df$Content.Rating[apps.df$Content.Rating == "Unrated" | apps.df$Content.Rating == "Adults only 18+"] = NA
+apps.df = mutate(apps.df[,-c(10:13)]) %>% na.omit %>% droplevels()
+apps.df = apps.df[!duplicated(apps.df),]
+
+#Tratamiento de Reviews pasando de factor a numérico.
+apps.df$Reviews = as.numeric(as.character(apps.df$Reviews))
+
+#Tratamiento del tamaño eliminando las letras del factor para poder transformar a numérico.
+apps.df$Size = as.character(apps.df$Size)
+size_express_mb <- "[0-9]+[[:punct:]]?[0-9]*M"
+size_express_kb <- "[0-9]+[[:punct:]]?[0-9]*k"
+
+index_mb <- grep(apps.df$Size,pattern = size_express_mb)
+mb.match = regexpr(apps.df$Size, pattern = size_express_mb)
+mb = regmatches(apps.df$Size,mb.match)
+
+mb1 <- substr(mb, 1,nchar(mb) - 1)
+mb1 <- as.numeric(mb1)*1000
+apps.df$Size[index_mb] <- mb1
+
+index_kb <- grep(apps.df$Size,pattern = size_express_kb)
+kb.match = regexpr(apps.df$Size, pattern = size_express_kb)
+kb = regmatches(apps.df$Size,kb.match)
+
+kb1 <- substr(kb, 1,nchar(kb) - 1)
+kb1 <- as.numeric(kb1)
+apps.df$Size[index_kb] <- kb1
+apps.df$Size = as.numeric(apps.df$Size)
+
+# Tratamiento de la variable Install eliminando el símbolo "+" y ",".
+
+apps.df$Installs = as.character(apps.df$Installs)
+apps.df$Installs = substr(apps.df$Installs, 1, nchar(apps.df$Installs)-1)
+apps.df$Installs = gsub(",", "", c(apps.df$Installs))
+apps.df$Installs = as.numeric(apps.df$Installs)
+
+#Tratamiento de la variable Price eliminando el símbolo "$".
+
+apps.df$Price = as.character(apps.df$Price)
+apps.df$Price = substr(apps.df$Price, 2, nchar(apps.df$Price))
+apps.df$Price[apps.df$Price == ""] = 0
+apps.df$Price = as.numeric(apps.df$Price)
+
+#Comprobación de los datos.
+summary(apps.df)
+str(apps.df)
+```
+
+Se separan los datos en train/validation/test una vez tratados.
+
+```{r}
+#Definimos una semilla para que el ejercicio sea reproducible
+set.seed(2019)
+# Se separa de la siguiente manera: 60% a train, 20% a validate y 20% a test
+inTraining <- createDataPartition(apps.df$Installs, p=0.6, list=FALSE)
+training.set <- apps.df[inTraining,]
+Totalvalidation.set <- apps.df[-inTraining,]
+# Ahora creamos una nueva partición del 40% de los datos, 20% a testing y 20% a validation
+inValidation <- createDataPartition(Totalvalidation.set$Installs, p=0.5, list=FALSE)
+testing.set <- Totalvalidation.set[inValidation,]
+validation.set <- Totalvalidation.set[-inValidation,]
+
+dataset <- training.set
+validation <- validation.set
+test <- testing.set
+
+# El modelo final usara todos los datos menos test.
+total <- rbind(dataset, validation)
+```
+
+Se pasa a definir los parametros de control y el grid para realizar el tuning de los distintos modelos a comparar.
+
+```{r}
+set.seed(2019)
+fitControl <- trainControl(method = 'cv', number = 5, summaryFunction=defaultSummary)
+getModelInfo()$gbm$parameters
+
+#El primer Grid es el de boosting.
+gbmGrid <-  expand.grid(interaction.depth = c(1,4,7,10),
+                        n.trees = c(500, 1000, 2000),
+                        shrinkage = c(.005, .02,.05),
+                        n.minobsinnode = 10)
+
+getModelInfo()$rf$parameters
+
+#En segundo lugar XGBoost.
+tuneGridXGB <- expand.grid(
+  nrounds=c(350),
+  max_depth = c(4, 6),
+  eta = c(0.05, 0.1),
+  gamma = c(0.01),
+  colsample_bytree = c(0.75),
+  subsample = c(0.50),
+  min_child_weight = c(0))
+
+#Por ultimo definimos el de Random Forest.
+#mtry max:
+ncol(apps.df)-1
+rfGrid <-  expand.grid(mtry = c(1,2,3,4,6,8))
+```
+
+Empezamos la comparación con el modelo boosting.
+
+```{r}
+set.seed(2019)
+### Gradient boosting machine algorithm. ###
+fit.gbm <- train(Installs~. -App, data=dataset, method = 'gbm', trControl=fitControl, tuneGrid=gbmGrid, metric='RMSE')
+fit.gbm
+plot(fit.gbm)
+fit.gbm$bestTune
+fit.gbm$results
+res_gbm <- fit.gbm$results
+RMSE_gbm <- subset(res_gbm[5])
+# CV con mejor "tune"
+BCV.RMSE = max(RMSE_gbm)
+
+boost.caret.pred <- predict(fit.gbm,validation)
+B.RMSE = (mean((boost.caret.pred - validation$Installs)^2))^0.5
+```
+
+En segundo lugar XGBoosting.
+
+```{r}
+set.seed(2019)
+### EXtreme Gradient boosting algorithm. ###
+fit.gbmx <- train(Installs~. -App, data=dataset, method = 'xgbTree', trControl=fitControl, tuneGrid=tuneGridXGB, metric='RMSE')
+fit.gbmx
+plot(fit.gbmx)
+fit.gbmx$bestTune
+fit.gbmx$results
+res_gbmx <- fit.gbmx$results
+RMSE_gbmx <- subset(res_gbmx[8])
+# CV con mejor "tune"
+XBCV.RMSE = max(RMSE_gbmx)
+
+xboost.caret.pred <- predict(fit.gbmx,validation)
+XB.RMSE = (mean((xboost.caret.pred - validation$Installs)^2))^0.5
+
+```
+
+Por último Random Forest.
+
+```{r}
+set.seed(2019)
+### Random Forest algorithm. ###
+fit.rf <- train(Installs~. -App, data=dataset, method = 'rf', trControl=fitControl, tuneGrid=rfGrid, metric='RMSE')
+fit.rf
+plot(fit.rf)
+res_rf <- fit.rf$results
+RMSE_rf <- subset(res_rf[2]) 
+
+# CV con mejor "tune" 
+RFCV.RMSE = max(RMSE_rf)
+
+
+rf.caret.pred <- predict(fit.rf,validation)
+RF.RMSE = (mean((rf.caret.pred - validation$Installs)^2))^0.5
+```
+
+```{r tabla_resumen, include=FALSE}
+
+Tabla_Resultados <- matrix( c(BCV.RMSE, B.RMSE, XBCV.RMSE, XB.RMSE, RFCV.RMSE, RF.RMSE),
+             nrow = 2, ncol = 3)
+dimnames(Tabla_Resultados) <- list(c("CV", "Validation set"), c("Boosting", "XGB", "Random Forest"))
+
+which.min(Tabla_Resultados)
+
+```
+```{r echo=FALSE, fig.align="center", out.width='40%', out.height='40%', table-Resultados1}
+knitr::kable(Tabla_Resultados, caption = "Resultados RMSE")
+```
+
+El mejor resultado corresponde a eXtreme Gradient Boosting, por lo tanto será el modelo que se usará para la predicción evaluando en test.
+
+```{r}
+set.seed(2019)
+fit.xgb_total <- train(Installs~. -App, data=total, method = 'xgbTree', trControl=fitControl, tuneGrid=tuneGridXGB, metric='RMSE')
+fit.xgb_total
+fit.xgb_total$bestTune
+
+res_xgb_total <- fit.xgb_total$results
+RMSE_xgb_total <- subset(res_xgb_total[8])
+# CV con mejor "tune"
+XBCV_T.RMSE = max(RMSE_xgb_total)
+
+#Evaluamos en test
+xboost.caret.pred_total <- predict(fit.xgb_total,test)
+XB_T.RMSE = (mean((xboost.caret.pred_total - test$Installs)^2))^0.5
+```
+
+```{r tabla_resumen, include=FALSE}
+
+Tabla_Resultados <- matrix( c(XBCV_T.RMSE, XB_T.RMSE),
+             nrow = 2, ncol = 1)
+dimnames(Tabla_Resultados) <- list(c("CV", "Validation set"), c("eXtreme Gradient Boosting"))
+
+which.min(Tabla_Resultados)
+
+```
+```{r echo=FALSE, fig.align="center", out.width='40%', out.height='40%', table-Resultados1}
+knitr::kable(Tabla_Resultados, caption = "Resultados RMSE")
+```

@@ -48,9 +48,9 @@ apps.df$Installs = as.numeric(apps.df$Installs)
 apps.df$Price = as.character(apps.df$Price)
 apps.df$Price = substr(apps.df$Price, 2, nchar(apps.df$Price))
 apps.df$Price[apps.df$Price == ""] = 0
+apps.df$Price = as.numeric(apps.df$Price)
 
-
-set.seed(11)
+set.seed(2019)
 
 
 
@@ -77,7 +77,7 @@ fitControl <- trainControl(method = 'cv', number = 5, summaryFunction=defaultSum
 
 getModelInfo()$gbm$parameters
 gbmGrid <-  expand.grid(interaction.depth = c(1,4,7,10),
-                        n.trees = c(500,1000,2000),
+                        n.trees = c(500, 1000, 2000),
                         shrinkage = c(.005, .02,.05),
                         n.minobsinnode = 10)
 gbmGrid
@@ -91,13 +91,15 @@ rfGrid
 
 
 ### Gradient boosting machine algorithm. ###
-fit.gbm <- train(Installs~ . -App, data=dataset, method = 'gbm', trControl=fitControl, tuneGrid=gbmGrid, metric='Accuracy', distribution='multinomial')
+fit.gbm <- train(Installs~. -App, data=dataset, method = 'gbm', trControl=fitControl, tuneGrid=gbmGrid, metric='RMSE')
 fit.gbm
 plot(fit.gbm)
 fit.gbm$bestTune
-
+fit.gbm$results
 res_gbm <- fit.gbm$results
 acc_gbm <- subset(res_gbm[5])
 # CV con mejor "tune"
 max(acc_gbm)
-# 0.6165743
+
+boost.caret.pred <- predict(fit.gbm,validation)
+(mean((boost.caret.pred - validation$Installs)^2))^0.5
