@@ -1,11 +1,10 @@
 ---
-title: "Ortiz_Javier_GoogleApps"
+title: "Ortiz_Javier_GooglePSApps"
 author: "Javier Ortiz Montenegro"
-date: "4 de enero de 2019"
+date: "8 de enero de 2019"
 output:
-  html_document: default
-  pdf_document: default
   word_document: default
+  html_document: default
 ---
 
 ```{r setup, include=FALSE}
@@ -33,6 +32,9 @@ require("gbm")
 
 Posteriormente se realiza la carga y tratamiento de los datos. Al realizar un "summary" de los datos cargados nos encontramos frente a varios problemas, algunos errores en valores imposibles (Rating de 19 cuando unicamente es de 1 a 5), una observación se ha introducido incorrectamente, NAs, practicamente todas las variables como factor, etc...
 
+Especial mención al tratamiento de la variable "Installs" variable que se tratará de predecir. En estos datos aparece como una variable discreta. Por lo tanto, se ha optado por unificar la cantidad de "Installs" en cuatro categorías (Menos de 50K, entre 50K y 1M, entre 1M y 10M y más de 10M), de esta manera se convierte en un problema de clasificación y se tratará como tal.
+No obstante, comentar que de forma autonoma he realizado el mismo estudio convirtiendo los datos a numerico y realizando una predicción. Pero debido a unos mejores resultados mediante clasificación he decidido decantarme finalmente por ese método.
+
 ```{r}
 #Carga de datos y revisión de los mismos.
 apps.df = read.csv("googleplaystore.csv")
@@ -50,7 +52,7 @@ apps.df = apps.df[!duplicated(apps.df),]
 #Tratamiento de Reviews pasando de factor a numérico.
 apps.df$Reviews = as.numeric(as.character(apps.df$Reviews))
 
-#Tratamiento del tamaño eliminando las letras del factor para poder transformar a numérico.
+#Tratamiento de Size eliminando las letras del factor para poder transformar a numérico.
 apps.df$Size = as.character(apps.df$Size)
 size_express_mb <- "[0-9]+[[:punct:]]?[0-9]*M"
 size_express_kb <- "[0-9]+[[:punct:]]?[0-9]*k"
@@ -72,12 +74,30 @@ kb1 <- as.numeric(kb1)
 apps.df$Size[index_kb] <- kb1
 apps.df$Size = as.numeric(apps.df$Size)
 
-# Tratamiento de la variable Install eliminando el símbolo "+" y ",".
+#Tratamiento de Installs, unificando en 4 factores.
+apps.df$Installs <- as.character(apps.df$Installs)
 
-apps.df$Installs = as.character(apps.df$Installs)
-apps.df$Installs = substr(apps.df$Installs, 1, nchar(apps.df$Installs)-1)
-apps.df$Installs = gsub(",", "", c(apps.df$Installs))
-apps.df$Installs = as.numeric(apps.df$Installs)
+index1 = which(apps.df$Installs == "1+" | apps.df$Installs == "5+" |
+                apps.df$Installs == "10+" | apps.df$Installs == "50+" |
+                apps.df$Installs == "100+" | apps.df$Installs == "500+" |
+                 apps.df$Installs == "1,000+" | apps.df$Installs == "5,000+" |
+               apps.df$Installs == "10,000+")
+
+index2 = which(apps.df$Installs == "50,000+" | apps.df$Installs == "100,000+" | apps.df$Installs == "500,000+")
+
+index3 = which(apps.df$Installs == "1,000,000+" | apps.df$Installs == "5,000,000+")
+
+index4 = which(apps.df$Installs == "10,000,000+" | apps.df$Installs == "50,000,000+" |
+                 apps.df$Installs == "100,000,000+" | apps.df$Installs == "500,000,000+" |
+                 apps.df$Installs == "1,000,000,000+")
+
+apps.df$Installs[index1] <- "Under 50k+"
+apps.df$Installs[index2] <- "50k+ to 500k+"
+apps.df$Installs[index3] <- "1m+ to 5m+"
+apps.df$Installs[index4] <- "Over 10m"
+
+level <- c("Under 50k+", "50k+ to 500k+", "1m+ to 5m+", "Over 10m")
+apps.df$Installs <- factor(apps.df$Installs, levels = level)
 
 #Tratamiento de la variable Price eliminando el símbolo "$".
 
@@ -123,7 +143,7 @@ fitControl <- trainControl(method = 'cv', number = 5, summaryFunction=defaultSum
 
 #El primer Grid es el de boosting.
 gbmGrid <-  expand.grid(interaction.depth = c(1,4,7,10),
-                        n.trees = c(500, 1000, 2000),
+                        n.trees = c(500, 1000, 500), #He reducido la cantidad de arboles para reducir el tiempo de procesamiento y debido a que si mantenía los parametros que pretendía usar (500, 1000, 2000), me aparecía un error informando de que la memoría de mi ordenador era insuficiente.
                         shrinkage = c(.005, .02,.05),
                         n.minobsinnode = 10)
 
@@ -150,21 +170,22 @@ Empezamos la comparación con el modelo boosting.
 ```{r results="hide"}
 set.seed(2019)
 ### Gradient boosting machine algorithm. ###
-fit.gbm <- train(Installs~. -App, data=dataset, method = 'gbm', trControl=fitControl, tuneGrid=gbmGrid, metric='RMSE')
+fit.gbm <- train(Installs~. -App, data=dataset, method = 'gbm', trControl=fitControl, tuneGrid=gbmGrid, metric='Accuracy', distribution='multinomial')
 ```
 ```{r}
 
 plot(fit.gbm)
-#Como se puede ver en el gráfico el mejor "tune" corresponde a un shrinkage de 0.05, 2000 arboles e "interaction depth"" de 7
+#Como se puede ver en el gráfico el mejor "tune" corresponde a un shrinkage de 0.005, 500 arboles e "interaction depth"" de 10
 fit.gbm$bestTune
 
 res_gbm <- fit.gbm$results
-RMSE_gbm <- subset(res_gbm[5])
+acc_gbm <- subset(res_gbm[5])
 # CV con mejor "tune"
-BCV.RMSE = min(RMSE_gbm)
+BCV.acc = max(acc_gbm)
 
 boost.caret.pred <- predict(fit.gbm,validation)
-B.RMSE = (mean((boost.caret.pred - validation$Installs)^2))^0.5
+table(boost.caret.pred ,validation$Installs)
+B.acc = mean(boost.caret.pred==validation$Installs)
 ```
 
 En segundo lugar XGBoosting.
@@ -172,19 +193,21 @@ En segundo lugar XGBoosting.
 ```{r}
 set.seed(2019)
 ### EXtreme Gradient boosting algorithm. ###
-fit.gbmx <- train(Installs~. -App, data=dataset, method = 'xgbTree', trControl=fitControl, tuneGrid=tuneGridXGB, metric='RMSE')
+fit.gbmx <- train(Installs~. -App, data=dataset, method = 'xgbTree', trControl=fitControl, tuneGrid=tuneGridXGB, metric='Accuracy', distribution='multinomial')
 
 plot(fit.gbmx)
 #Se muestran abajo los parámetros del mejor "tune" que se puede apreciar en la gráfica.
 fit.gbmx$bestTune
 
 res_gbmx <- fit.gbmx$results
-RMSE_gbmx <- subset(res_gbmx[8])
+acc_gbmx <- subset(res_gbmx[8])
 # CV con mejor "tune"
-XBCV.RMSE = min(RMSE_gbmx)
+XBCV.acc = max(acc_gbmx)
+
 
 xboost.caret.pred <- predict(fit.gbmx,validation)
-XB.RMSE = (mean((xboost.caret.pred - validation$Installs)^2))^0.5
+table(xboost.caret.pred ,validation$Installs)
+XB.acc = mean(xboost.caret.pred==validation$Installs)
 
 ```
 
@@ -193,67 +216,68 @@ Por último Random Forest.
 ```{r}
 set.seed(2019)
 ### Random Forest algorithm. ###
-fit.rf <- train(Installs~. -App, data=dataset, method = 'rf', trControl=fitControl, tuneGrid=rfGrid, metric='RMSE')
+fit.rf <- train(Installs~. -App, data=dataset, method = 'rf', trControl=fitControl, tuneGrid=rfGrid, metric='Accuracy', distribution='multinomial')
 
 plot(fit.rf)
 #Como se puede ver en la gráfica el número óptimo de predictores seleccionados es 8.
 
 res_rf <- fit.rf$results
-RMSE_rf <- subset(res_rf[2]) 
+acc_rf <- subset(res_rf[2]) 
 
 # CV con mejor "tune" 
-RFCV.RMSE = min(RMSE_rf)
-
+RFCV.acc = max(acc_rf)
 
 rf.caret.pred <- predict(fit.rf,validation)
-RF.RMSE = (mean((rf.caret.pred - validation$Installs)^2))^0.5
+table(rf.caret.pred ,validation$Installs)
+RF.acc = mean(rf.caret.pred==validation$Installs)
 ```
 
 ```{r tabla_resumen, include=FALSE}
 
-Tabla_Resultados <- matrix( c(B.RMSE, XB.RMSE, RF.RMSE),
+Tabla_Resultados <- matrix( c(round(B.acc, 4), round(XB.acc, 4), round(RF.acc, 4)),
              nrow = 1, ncol = 3)
-dimnames(Tabla_Resultados) <- list(c("RMSE"), c("Boosting", "XGB", "Random Forest"))
+dimnames(Tabla_Resultados) <- list(c("Accuracy"), c("Boosting", "XGB", "Random Forest"))
 
 which.min(Tabla_Resultados)
-
 ```
 ```{r echo=FALSE, fig.align="center", out.width='40%', out.height='40%', table-Resultados1}
-knitr::kable(Tabla_Resultados, caption = "Resultados RMSE")
+knitr::kable(Tabla_Resultados, caption = "Resultados Accuracy")
 ```
 
-Como se puede ver en la tabla, con mucha diferencia el mejor resultado corresponde a eXtreme Gradient Boosting en validation set.
+Como se puede ver en la tabla, aunque todos los modelos están muy ajustados, el mejor resultado corresponde a eXtreme Gradient Boosting, acertando a la hora de clasificar con una probabilidad de `r round(XB.acc, 4)`.
 Por lo tanto, será el modelo que se usará para la predicción evaluando en test usando el 100% de los datos.
 
 ```{r}
 set.seed(2019)
-fit.xgb_total <- train(Installs~. -App, data=total, method = 'xgbTree', trControl=fitControl, tuneGrid=tuneGridXGB, metric='RMSE')
+fit.xgb_total <- train(Installs~. -App, data=total, method = 'xgbTree', trControl=fitControl, tuneGrid=tuneGridXGB, metric='Accuracy', distribution='multinomial')
 plot(fit.xgb_total)
 fit.xgb_total$bestTune
 
 res_xgb_total <- fit.xgb_total$results
-RMSE_xgb_total <- subset(res_xgb_total[8])
+acc_xgb_total <- subset(res_xgb_total[8])
 # CV con mejor "tune"
-XBCV_T.RMSE = min(RMSE_xgb_total)
+XBCV_T.acc = min(acc_xgb_total)
 
 #Evaluamos en test
 xboost.caret.pred_total <- predict(fit.xgb_total,test)
-XB_T.RMSE = (mean((xboost.caret.pred_total - test$Installs)^2))^0.5
+table(xboost.caret.pred_total ,test$Installs)
+XB_T.acc = mean(xboost.caret.pred_total==test$Installs)
 ```
+
+Como se puede ver en la tabla el modelo es muy acertado a la hora de clasificar la cantidad de descargas de una app, aún cuando falla suele fallar en el grupo adyacente y raramente en los más alejados.
 
 ```{r tabla_resumen2, include=FALSE}
 
-Tabla_Resultados2 <- matrix( c(XBCV_T.RMSE, XB_T.RMSE),
-             nrow = 2, ncol = 1)
-dimnames(Tabla_Resultados2) <- list(c("CV", "Validation set"), c("eXtreme Gradient Boosting"))
+Tabla_Resultados2 <- matrix( round(XB_T.acc, 4),
+             nrow = 1, ncol = 1)
+dimnames(Tabla_Resultados2) <- list(c("Accuracy del modelo"), c("eXtreme Gradient Boosting"))
 
 which.min(Tabla_Resultados2)
 
 ```
 ```{r echo=FALSE, fig.align="center", out.width='40%', out.height='40%', table-Resultados2}
-knitr::kable(Tabla_Resultados2, caption = "Resultados RMSE")
+knitr::kable(Tabla_Resultados2, caption = "Resultados accuracy")
 ```
 
-Se puede apreciar como usando todos los datos el RMSE ha aumentado ligeramente. 
-Sin embargo, este sería el mejor modelo para predecir las descargas de una app con una error medio de `r XB_T.RMSE`.
-Error que, teniendo en cuenta el gran tamaño de la variable a predecir, es un resultado aceptable.
+Se puede apreciar como usando todos los datos la probabilidad de acertar ha aumentado ligeramente a `r round(XB_T.acc, 4)`. 
+Este resultado significa que este modelo acierta el `r round(XB_T.acc*100, 2)`% de las veces a la hora de clasificar la cantidad de descargas de una app. Lo cual aparentemente es una clasificación bastante precisa.

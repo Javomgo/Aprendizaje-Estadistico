@@ -1,5 +1,6 @@
 library(dplyr)
 library(tidyr)
+library(xgboost)
 require("caret")
 require("randomForest")
 require("gbm")
@@ -97,9 +98,62 @@ plot(fit.gbm)
 fit.gbm$bestTune
 fit.gbm$results
 res_gbm <- fit.gbm$results
-acc_gbm <- subset(res_gbm[5])
+RMSE_gbm <- subset(res_gbm[5])
 # CV con mejor "tune"
-max(acc_gbm)
+BCV.RMSE = max(RMSE_gbm)
 
 boost.caret.pred <- predict(fit.gbm,validation)
-(mean((boost.caret.pred - validation$Installs)^2))^0.5
+B.RMSE = (mean((boost.caret.pred - validation$Installs)^2))^0.5
+
+### EXtreme Gradient boosting algorithm. ###
+
+tuneGridXGB <- expand.grid(
+  nrounds=c(350),
+  max_depth = c(4, 6),
+  eta = c(0.05, 0.1),
+  gamma = c(0.01),
+  colsample_bytree = c(0.75),
+  subsample = c(0.50),
+  min_child_weight = c(0))
+
+fit.gbmx <- train(Installs~. -App, data=dataset, method = 'xgbTree', trControl=fitControl, tuneGrid=tuneGridXGB, metric='RMSE')
+fit.gbmx
+
+fit.gbmx$bestTune
+fit.gbmx$results
+res_gbmx <- fit.gbmx$results
+RMSE_gbmx <- subset(res_gbmx[8])
+# CV con mejor "tune"
+XBCV.RMSE = max(RMSE_gbmx)
+
+xboost.caret.pred <- predict(fit.gbmx,validation)
+XB.RMSE = (mean((xboost.caret.pred - validation$Installs)^2))^0.5
+
+### Random Forest algorithm. ###
+fit.rf <- train(Installs~. -App, data=dataset, method = 'rf', trControl=fitControl, tuneGrid=rfGrid, metric='RMSE')
+fit.rf
+
+res_rf <- fit.rf$results
+RMSE_rf <- subset(res_rf[2]) 
+# Note: accuracy is in the second column!
+# CV con mejor "tune" 
+RFCV.RMSE = max(RMSE_rf)
+
+
+rf.caret.pred <- predict(fit.rf,validation)
+RF.RMSE = (mean((rf.caret.pred - validation$Installs)^2))^0.5
+
+## XGB wins
+set.seed(2019)
+fit.xgb_total <- train(Installs~. -App, data=total, method = 'xgbTree', trControl=fitControl, tuneGrid=tuneGridXGB, metric='RMSE')
+fit.xgb_total
+fit.xgb_total$bestTune
+
+res_xgb_total <- fit.xgb_total$results
+RMSE_xgb_total <- subset(res_xgb_total[8])
+# CV con mejor "tune"
+max(RMSE_xgb_total)
+
+#Evaluate on test
+xboost.caret.pred_total <- predict(fit.xgb_total,test)
+XB_T.RMSE = (mean((xboost.caret.pred_total - test$Installs)^2))^0.5
