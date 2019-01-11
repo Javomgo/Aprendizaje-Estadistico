@@ -46,7 +46,7 @@ apps.df$Installs[apps.df$Installs == "Free" ] = NA
 apps.df$Rating[apps.df$Rating == 19] = NA
 apps.df$Size[apps.df$Size == "Varies with device"] = NA
 apps.df$Content.Rating[apps.df$Content.Rating == "Unrated" | apps.df$Content.Rating == "Adults only 18+"] = NA
-apps.df = mutate(apps.df[,-c(10:13)]) %>% na.omit %>% droplevels() #En esta línea elimino las ultimas columnas del dataset ya que corresponden a la versión de la app, de android y la ultima vez actualizados, datos que me parecen poco importantes para la predicción de la cantidad de descargas.
+apps.df = mutate(apps.df[,-c(10:13)]) %>% na.omit %>% droplevels() #En esta línea elimino las ultimas columnas del dataset ya que corresponden a la versión de la app, de android y la ultima vez actualizados, datos que me parecen poco importantes para la clasificación de la cantidad de descargas.
 apps.df = apps.df[!duplicated(apps.df),]
 
 #Tratamiento de Reviews pasando de factor a numérico.
